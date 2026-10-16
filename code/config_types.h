@@ -50,6 +50,11 @@ struct Config {
 #define DEFAULT_WEB_USER "admin"
 #define DEFAULT_WEB_PASS "admin123"
 
+// 短信接收去重相关定义
+#define SMS_DEDUP_CACHE_SIZE 32                 // 最近 PDU 指纹缓存数量
+#define SMS_DEDUP_WINDOW_MS (30UL * 60UL * 1000UL) // 重复短信抑制窗口：30 分钟
+#define SMS_ACK_TIMEOUT_MS 1500                 // AT+CNMA 确认响应超时
+
 // 长短信合并相关定义
 #define MAX_CONCAT_PARTS 10       // 最大支持的长短信分段数
 #define CONCAT_TIMEOUT_MS 30000   // 长短信等待超时时间(毫秒)

@@ -146,7 +146,8 @@ String readSerialLine(HardwareSerial& port) {
 
 // 检查字符串是否为有效的十六进制PDU数据
 bool isHexString(const String& str) {
-  if (str.length() == 0) return false;
+  // PDU 每个字节必须由两个十六进制字符表示
+  if (str.length() < 2 || (str.length() % 2) != 0) return false;
   for (unsigned int i = 0; i < str.length(); i++) {
     char c = str.charAt(i);
     if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) {
@@ -154,6 +155,119 @@ bool isHexString(const String& str) {
     }
   }
   return true;
+}
+
+// CNMA 等待期间若又收到 URC，先保存在这里，随后仍由 checkSerial1URC() 统一处理。
+// 这样 ACK 事务不会吞掉紧随其后的另一条短信。
+#define DEFERRED_MODEM_LINE_COUNT 8
+static String deferredModemLines[DEFERRED_MODEM_LINE_COUNT];
+static uint8_t deferredModemHead = 0;
+static uint8_t deferredModemTail = 0;
+static uint8_t deferredModemCount = 0;
+
+static bool deferModemLine(const String& line) {
+  if (deferredModemCount >= DEFERRED_MODEM_LINE_COUNT) {
+    logCaptureLn(String("⚠️ 模组延迟行缓冲区已满，丢弃: " + line));
+    return false;
+  }
+  deferredModemLines[deferredModemTail] = line;
+  deferredModemTail = (uint8_t)((deferredModemTail + 1) % DEFERRED_MODEM_LINE_COUNT);
+  deferredModemCount++;
+  return true;
+}
+
+// 对 +CMT 直推短信发送 RP-ACK。不能复用 sendATCommand()，它会先清空串口。
+// 使用统一的逐行读取器，并把非本事务响应重新排队，避免吞掉并发 URC。
+static bool acknowledgeDirectSms() {
+  Serial1.println("AT+CNMA=1");
+
+  unsigned long start = millis();
+  while (millis() - start < SMS_ACK_TIMEOUT_MS) {
+    String line = readSerialLine(Serial1);
+    if (line.length() == 0) {
+      delay(1);
+      continue;
+    }
+
+    String trimmed = line;
+    trimmed.trim();
+    if (trimmed.length() == 0 || trimmed == "AT+CNMA=1") continue;
+    if (trimmed == "OK") {
+      logCaptureLn(String("✅ 短信接收确认成功 (AT+CNMA=1)"));
+      return true;
+    }
+    if (trimmed == "ERROR" || trimmed.startsWith("+CME ERROR") ||
+        trimmed.startsWith("+CMS ERROR")) {
+      logCaptureLn(String("⚠️ 短信接收确认失败: " + trimmed));
+      return false;
+    }
+
+    deferModemLine(line);
+  }
+
+  logCaptureLn(String("⚠️ 短信接收确认超时"));
+  return false;
+}
+
+struct SmsPduFingerprint {
+  uint64_t hash;
+  uint16_t byteLength;
+  unsigned long seenAt;
+  bool valid;
+};
+
+static SmsPduFingerprint smsDedupCache[SMS_DEDUP_CACHE_SIZE] = {};
+static uint8_t smsDedupNext = 0;
+
+static uint8_t hexNibble(char c) {
+  if (c >= '0' && c <= '9') return (uint8_t)(c - '0');
+  if (c >= 'A' && c <= 'F') return (uint8_t)(c - 'A' + 10);
+  return (uint8_t)(c - 'a' + 10);
+}
+
+// 对规范化后的 PDU 字节计算 FNV-1a 64 位指纹，避免十六进制大小写造成差异。
+static uint64_t fingerprintPdu(const String& pduLine) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (unsigned int i = 0; i < pduLine.length(); i += 2) {
+    uint8_t value = (uint8_t)((hexNibble(pduLine.charAt(i)) << 4) |
+                              hexNibble(pduLine.charAt(i + 1)));
+    hash ^= value;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+// 返回 true 表示该完整 PDU 在去重窗口内已经处理过；首次出现时写入缓存。
+static bool isDuplicateSmsPdu(const String& pduLine, unsigned long* ageMs) {
+  const uint64_t hash = fingerprintPdu(pduLine);
+  const uint16_t byteLength = (uint16_t)(pduLine.length() / 2);
+  const unsigned long now = millis();
+
+  for (int i = 0; i < SMS_DEDUP_CACHE_SIZE; i++) {
+    if (!smsDedupCache[i].valid || smsDedupCache[i].hash != hash ||
+        smsDedupCache[i].byteLength != byteLength) {
+      continue;
+    }
+
+    unsigned long age = now - smsDedupCache[i].seenAt; // 无符号减法可安全处理 millis 回绕
+    if (age < SMS_DEDUP_WINDOW_MS) {
+      if (ageMs != nullptr) *ageMs = age;
+      return true;
+    }
+
+    // 相同指纹已过期，原位刷新，避免一个 PDU 占用多个环形槽位。
+    smsDedupCache[i].seenAt = now;
+    if (ageMs != nullptr) *ageMs = 0;
+    return false;
+  }
+
+  smsDedupCache[smsDedupNext].hash = hash;
+  smsDedupCache[smsDedupNext].byteLength = byteLength;
+  smsDedupCache[smsDedupNext].seenAt = now;
+  smsDedupCache[smsDedupNext].valid = true;
+  smsDedupNext = (uint8_t)((smsDedupNext + 1) % SMS_DEDUP_CACHE_SIZE);
+  if (ageMs != nullptr) *ageMs = 0;
+  return false;
 }
 
 // 检查发送者是否在号码黑名单中
@@ -302,7 +416,15 @@ void checkSerial1URC() {
   static enum { IDLE,
                 WAIT_PDU } state = IDLE;
 
-  String line = readSerialLine(Serial1);
+  String line;
+  if (deferredModemCount > 0) {
+    line = deferredModemLines[deferredModemHead];
+    deferredModemLines[deferredModemHead] = "";
+    deferredModemHead = (uint8_t)((deferredModemHead + 1) % DEFERRED_MODEM_LINE_COUNT);
+    deferredModemCount--;
+  } else {
+    line = readSerialLine(Serial1);
+  }
   if (line.length() == 0) return;
 
   // 打印到调试串口
@@ -320,15 +442,28 @@ void checkSerial1URC() {
       return;
     }
     
-    // 如果是十六进制字符串，认为是PDU数据
+    // 如果是偶数长度的十六进制字符串，认为是PDU数据
     if (isHexString(line)) {
+      // 已完整接收 PDU，先退出等待状态，再尽快确认网络侧投递。
+      // 确认必须发生在 SMTP/HTTP 等耗时操作之前，否则网络可能重发同一条短信。
+      state = IDLE;
       logCaptureLn(String("收到PDU数据: " + line));
       logCaptureLn(String("PDU长度: " + String(line.length()) + " 字符"));
-      
-      // 解析PDU
+      // 先做快速解析验证；成功后立即确认，再开始任何 SMTP/HTTP 耗时操作。
+      // 解析失败时不发送正向确认，让网络侧保留重新投递机会。
       if (!pdu.decodePDU(line.c_str())) {
-        logCaptureLn(String("❌ PDU解析失败！"));
+        logCaptureLn(String("❌ PDU解析失败，未发送AT+CNMA正向确认"));
       } else {
+        acknowledgeDirectSms();
+
+        // 第二道防线：即使模组或网络仍重发相同 PDU，也不重复通知。
+        unsigned long duplicateAgeMs = 0;
+        if (isDuplicateSmsPdu(line, &duplicateAgeMs)) {
+          logCaptureF("♻️ 检测到重复短信PDU，已确认但跳过通知（距首次处理 %lu 秒）\n",
+                      duplicateAgeMs / 1000UL);
+          return;
+        }
+
         logCaptureLn(String("✓ PDU解析成功"));
         logCaptureLn(String("=== 短信内容 ==="));
         logCaptureLn(String("发送者: " + String(pdu.getSender())));
@@ -395,8 +530,7 @@ void checkSerial1URC() {
         }
       }
       
-      // 返回IDLE状态
-      state = IDLE;
+      // state 已在接收完整 PDU 后立即恢复为 IDLE
     } 
     // 如果是其他内容（OK、ERROR等），也返回IDLE
     else {

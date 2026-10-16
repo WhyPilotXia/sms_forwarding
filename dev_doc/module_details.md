@@ -342,7 +342,9 @@ checkSerial1URC() 循环:
   ┌─ WAIT_PDU 状态 ──────────────────────────────────┐
   │  读取下一行                                       │
   │  isHexString()?                                   │
-  │    ├─ 是 → pdu.decodePDU(line)                   │
+  │    ├─ 是 → AT+CNMA=1 确认网络侧投递              │
+  │    │       → 30 分钟 PDU 指纹去重                 │
+  │    │       → pdu.decodePDU(line)                  │
   │    │       ├─ 失败 → 打印错误, 回 IDLE            │
   │    │       └─ 成功 → 提取 sender/text/timestamp   │
   │    │                → 检查 concatInfo              │
@@ -383,6 +385,7 @@ checkSerial1URC() 循环:
 
 ### 修改指南
 
+- **调整短信去重窗口/容量**: 修改 `SMS_DEDUP_WINDOW_MS` / `SMS_DEDUP_CACHE_SIZE` 宏（config_types.h）
 - **调整长短信超时**: 修改 `CONCAT_TIMEOUT_MS` 宏（config_types.h）
 - **修改黑名单匹配逻辑**: 编辑 `isInNumberBlackList()`
 - **添加新管理员命令**: 在 `processAdminCommand()` 中添加 `else if` 分支

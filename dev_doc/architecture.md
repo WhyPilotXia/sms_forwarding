@@ -45,6 +45,8 @@ checkSerial1URC()          [sms_process.cpp]
     │  逐行读取 Serial1
     │  识别 "+CMT:" 头
     │  接收 PDU hex 数据
+    │  立即 AT+CNMA=1 确认网络侧投递
+    │  30 分钟 PDU 指纹去重（32 条缓存）
     ▼
 pdu.decodePDU()            [pdulib 库]
     │  提取 sender / timestamp / text

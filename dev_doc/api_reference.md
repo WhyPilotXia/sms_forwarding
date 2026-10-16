@@ -267,7 +267,17 @@ HMAC-SHA256(timestamp + "\n" + secret, secret) → Base64 → URLEncode
 ---
 
 ### `bool isHexString(const String& str)`
-检查字符串是否全为十六进制字符 `[0-9A-Fa-f]`。
+检查字符串是否为偶数长度且全为十六进制字符 `[0-9A-Fa-f]`。
+
+---
+
+### `bool acknowledgeDirectSms()`
+收到 `+CMT` 的完整 PDU 后立即发送 `AT+CNMA=1`，在短超时内消费并记录该指令的 `OK/ERROR`。该函数不会预先清空 UART，避免丢失模组数据。
+
+---
+
+### `bool isDuplicateSmsPdu(const String& pduLine, unsigned long* ageMs)`
+对规范化后的完整 PDU 字节计算 64 位 FNV-1a 指纹。最近 32 个 PDU 在 30 分钟内再次出现时返回 true，避免网络或模组重发导致重复邮件；重复 PDU 仍会先执行 `AT+CNMA=1`。
 
 ---
 
@@ -305,7 +315,7 @@ HMAC-SHA256(timestamp + "\n" + secret, secret) → Base64 → URLEncode
 **状态机**: `IDLE` ↔ `WAIT_PDU`
 
 IDLE 状态检测 `+CMT:` 行 → 转入 WAIT_PDU。
-WAIT_PDU 状态读取 PDU hex 数据 → `pdu.decodePDU()` 解析 → 根据 `concatInfo` 判断长短信/普通短信 → 恢复 IDLE。
+WAIT_PDU 状态读取有效 PDU hex 数据后立即恢复 IDLE → `AT+CNMA=1` 确认 → PDU 指纹去重 → `pdu.decodePDU()` 解析 → 根据 `concatInfo` 判断长短信/普通短信。重复 PDU 只确认、不再推送。
 
 ---
 
