@@ -4,6 +4,7 @@
 #include "modem.h"
 #include "push.h"
 #include "wifi_config.h"
+#include "wifi_manager.h"
 
 // ---- 日志环形缓冲区 ----
 String logBuffer[LOG_BUF_SIZE];
@@ -76,8 +77,11 @@ void handleRoot() {
   if (!checkAuth()) return;
   
   String html = String(htmlPage);
-  html.replace("%IP%", WiFi.localIP().toString());
-  html.replace("%WIFI_SSID%", String(WiFi.SSID()));
+  html.replace("%IP%", getActiveWifiAddress());
+  html.replace("%WIFI_SSID%", WiFi.status() == WL_CONNECTED ? String(WiFi.SSID()) : String("未连接"));
+  html.replace("%WIFI_CONFIG_SSID%", config.wifiSsid);
+  html.replace("%WIFI_MODE%", wifiApMode ? "AP+STA（配置热点已开启）" : "STA");
+  html.replace("%WIFI_AP_IP%", wifiApMode ? WiFi.softAPIP().toString() : "未开启");
   html.replace("%FREE_HEAP%", String(ESP.getFreeHeap() / 1024) + " KB");
   long uptimeSec = millis() / 1000;
   char uptimeBuf[16];
@@ -1078,42 +1082,68 @@ void handleModem() {
   server.send(200, "application/json", json);
 }
 
-// WiFi 重启
+// WiFi 重连（兼容旧版按钮）
 void handleWifi() {
   if (!checkAuth()) return;
-
-  static bool busy = false;
-  if (busy) {
-    server.send(429, "application/json", "{\"success\":false,\"message\":\"WiFi正忙，请稍后重试\"}");
+  if (server.arg("action") != "restart") {
+    server.send(400, "application/json", "{\"success\":false,\"message\":\"未知操作\"}");
     return;
   }
-  busy = true;
 
-  String action = server.arg("action");
-  if (action == "restart") {
-    logCaptureLn(String("网页端请求重启WiFi..."));
-    server.send(200, "application/json", "{\"success\":true,\"message\":\"WiFi 正在重启，请等待约 5 秒后刷新页面\"}");
-    WiFi.disconnect(true);
-    delay(500);
-    WiFi.setSleep(false);
-    WiFi.setAutoReconnect(true);
-    WiFi.setScanMethod(WIFI_FAST_SCAN);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    logCaptureLn(String("正在重新连接WiFi: " + String(WIFI_SSID)));
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-      delay(50);
-      server.handleClient();
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      logCaptureLn(String("WiFi 重连成功, IP: " + WiFi.localIP().toString()));
-    } else {
-      logCaptureLn(String("WiFi 重连失败，将在后台持续尝试"));
-    }
-  } else {
-    server.send(200, "application/json", "{\"success\":false,\"message\":\"未知操作\"}");
+  logCaptureLn(String("网页端请求重连 WiFi: " + config.wifiSsid));
+  server.send(200, "application/json", "{\"success\":true,\"message\":\"已开始重连；如地址变化，请连接配置热点后访问 192.168.4.1\"}");
+  WiFi.disconnect(false, false);
+  delay(200);
+  WiFi.mode(wifiApMode ? WIFI_AP_STA : WIFI_STA);
+  WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+}
+
+// 扫描附近 2.4GHz WiFi，供网页下拉选择
+void handleWifiScan() {
+  if (!checkAuth()) return;
+
+  int count = WiFi.scanNetworks(false, true);
+  String json = "[";
+  for (int i = 0; i < count; i++) {
+    if (i > 0) json += ",";
+    json += "{\"ssid\":\"" + jsonEscape(WiFi.SSID(i)) + "\",\"rssi\":" + String(WiFi.RSSI(i)) +
+            ",\"open\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "true" : "false") + "}";
   }
-  busy = false;
+  json += "]";
+  WiFi.scanDelete();
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", json);
+}
+
+// 保存首选 WiFi 到 NVS，并立即在保留热点的情况下尝试切换
+void handleWifiSave() {
+  if (!checkAuth()) return;
+
+  String ssid = server.arg("ssid");
+  String pass = server.arg("password");
+  ssid.trim();
+  if (ssid.length() == 0 || ssid.length() > 32) {
+    server.send(400, "application/json", "{\"success\":false,\"message\":\"SSID 长度必须为 1-32 字符\"}");
+    return;
+  }
+  // 同一 SSID 留空表示保留密码；切换到新 SSID 时留空表示开放网络。
+  if (pass.length() == 0 && ssid == config.wifiSsid) pass = config.wifiPass;
+  if (pass.length() > 0 && (pass.length() < 8 || pass.length() > 63)) {
+    server.send(400, "application/json", "{\"success\":false,\"message\":\"WiFi 密码长度必须为 8-63 字符\"}");
+    return;
+  }
+
+  config.wifiSsid = ssid;
+  config.wifiPass = pass;
+  saveConfig();
+
+  logCaptureLn(String("网页已更新首选 WiFi: " + config.wifiSsid));
+  server.send(200, "application/json", "{\"success\":true,\"message\":\"配置已保存，正在切换。可始终通过配置热点访问 http://192.168.4.1/\"}");
+  delay(300);
+  if (!wifiApMode) startWifiSetupAp(); // 回复后再开启热点，避免当前请求被中断
+  WiFi.disconnect(false, false);
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
 }
 
 // 系统控制命令

@@ -27,6 +27,8 @@ void handlePing();
 void handleLog();
 void handleModem();
 void handleWifi();
+void handleWifiScan();
+void handleWifiSave();
 void handleSystem();
 
 #endif

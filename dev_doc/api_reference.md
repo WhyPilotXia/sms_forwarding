@@ -18,6 +18,8 @@
 | `smtpUser` | String | `config.smtpUser` |
 | `smtpPass` | String | `config.smtpPass` |
 | `smtpSendTo` | String | `config.smtpSendTo` |
+| `wifiSsid` | String | `config.wifiSsid` |
+| `wifiPass` | String | `config.wifiPass` |
 | `adminPhone` | String | `config.adminPhone` |
 | `webUser` | String | `config.webUser` |
 | `webPass` | String | `config.webPass` |
@@ -41,6 +43,7 @@
 - `smtpPort`: 465
 - `webUser`: `"admin"` (`DEFAULT_WEB_USER`)
 - `webPass`: `"admin123"` (`DEFAULT_WEB_PASS`)
+- `wifiSsid` / `wifiPass`: 本地 `wifi_config.h` 的首次启动默认值；保存后使用 NVS
 - 通道名称: `"通道1"` ~ `"通道5"`
 - 通道类型: `PUSH_TYPE_POST_JSON` (1)
 

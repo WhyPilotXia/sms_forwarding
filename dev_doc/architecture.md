@@ -72,6 +72,19 @@ findOrCreateConcatSlot()    │
            └── sendEmailNotification()  [push.cpp]
 ```
 
+### WiFi 管理流程
+
+```
+启动 → 从 NVS 加载 wifiSsid / wifiPass
+  ├─ 最多尝试连接 3 次 → 成功：STA 模式提供 Web 管理
+  └─ 仍失败 → 启动 SMS-Forward-Setup 配置热点 (192.168.4.1)
+                  └─ STA 每 30 秒在后台继续重连
+
+Web 的“WiFi 设置”在 STA 和配置热点两种入口都可用：
+  GET  /wifi/scan → 扫描附近网络
+  POST /wifi/save → 保存到 NVS、保留热点并切换 STA
+```
+
 ### HTTP 请求流程
 
 ```
@@ -99,7 +112,9 @@ checkAuth()               [web_handlers.cpp]
     GET  /at       → handleATCommand()   透传 AT 指令到模组
     GET  /log      → handleLog()         返回环形缓冲区日志 (JSON 数组)
     GET  /modem    → handleModem()       模组重启/信号/运营商/IMEI
-    GET  /wifi     → handleWifi()        WiFi 重启
+    GET  /wifi     → handleWifi()        WiFi 重连（兼容旧按钮）
+    GET  /wifi/scan → handleWifiScan()   扫描附近 WiFi
+    POST /wifi/save → handleWifiSave()   保存 NVS 并切换 WiFi
     GET  /system   → handleSystem()      整机重启 (ESP.restart)
 ```
 

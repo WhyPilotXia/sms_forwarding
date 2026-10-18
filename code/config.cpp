@@ -1,5 +1,11 @@
 #include "config.h"
 #include "web_handlers.h"
+#if __has_include("wifi_config.h")
+#include "wifi_config.h"
+#else
+#define WIFI_SSID "1102"
+#define WIFI_PASS ""
+#endif
 
 // 保存配置到NVS
 void saveConfig() {
@@ -9,6 +15,8 @@ void saveConfig() {
   preferences.putString("smtpUser", config.smtpUser);
   preferences.putString("smtpPass", config.smtpPass);
   preferences.putString("smtpSendTo", config.smtpSendTo);
+  preferences.putString("wifiSsid", config.wifiSsid);
+  preferences.putString("wifiPass", config.wifiPass);
   preferences.putString("adminPhone", config.adminPhone);
   preferences.putString("webUser", config.webUser);
   preferences.putString("webPass", config.webPass);
@@ -38,6 +46,8 @@ void loadConfig() {
   config.smtpUser = preferences.getString("smtpUser", "");
   config.smtpPass = preferences.getString("smtpPass", "");
   config.smtpSendTo = preferences.getString("smtpSendTo", "");
+  config.wifiSsid = preferences.getString("wifiSsid", WIFI_SSID);
+  config.wifiPass = preferences.getString("wifiPass", WIFI_PASS);
   config.adminPhone = preferences.getString("adminPhone", "");
   config.webUser = preferences.getString("webUser", DEFAULT_WEB_USER);
   config.webPass = preferences.getString("webPass", DEFAULT_WEB_PASS);
@@ -113,5 +123,6 @@ bool isConfigValid() {
 
 // 获取当前设备URL
 String getDeviceUrl() {
-  return "http://" + WiFi.localIP().toString() + "/";
+  IPAddress ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP() : WiFi.softAPIP();
+  return "http://" + ip.toString() + "/";
 }

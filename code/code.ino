@@ -9,6 +9,7 @@
 #include "web_handlers.h"
 #include "sms_process.h"
 #include "web_handlers.h"
+#include "wifi_manager.h"
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -25,34 +26,13 @@ void setup() {
   loadConfig();
   configValid = isConfigValid();
 
-  // ---- WiFi 连接优化 ----
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);                    // 关闭 Modem Sleep，提高连接响应速度
-  WiFi.setAutoReconnect(true);             // 断线后自动重连
-  // 使用快速扫描而非全信道扫描（全信道扫描在空信道上等待超时极慢）
-  // 首次连接成功后 ESP32 会自动记住信道，下次启动更快
-  WiFi.setScanMethod(WIFI_FAST_SCAN);
-  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  logCaptureLn(String("连接wifi: ") + String(WIFI_SSID));
-
-  // 带超时的等待连接，失败则重启重试
-  unsigned long wifiStart = millis();
-  const unsigned long WIFI_TIMEOUT = 20000; // 20秒超时
-  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < WIFI_TIMEOUT) {
-    blink_short(200);
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    logCaptureLn(String("wifi已连接"));
-    logCapture(String("IP地址: "));
-    logCaptureLn(WiFi.localIP().toString());
-    logCapture(String("信号强度(RSSI): "));
-    logCaptureLn(String(WiFi.RSSI()) + " dBm");
-  } else {
-    logCaptureLn(String("⚠️ WiFi连接超时，即将重启重试..."));
-    delay(1000);
-    ESP.restart();
+  // 尝试 NVS 中保存的首选 WiFi；连续失败后保留 STA 重连并启动配置热点。
+  if (!connectConfiguredWifi(3, 12000)) {
+    logCaptureLn(String("⚠️ 多次连接 WiFi 失败，进入配置热点模式"));
+    startWifiSetupAp();
+    if (config.wifiSsid.length() > 0) {
+      WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+    }
   }
 
   server.on("/", handleRoot);
@@ -67,6 +47,8 @@ void setup() {
   server.on("/log", handleLog);
   server.on("/modem", handleModem);
   server.on("/wifi", handleWifi);
+  server.on("/wifi/scan", handleWifiScan);
+  server.on("/wifi/save", HTTP_POST, handleWifiSave);
   server.on("/system", handleSystem);
   server.begin();
   logCaptureLn(String("HTTP服务器已启动"));
@@ -113,6 +95,7 @@ void loop() {
       logCaptureLn(String("⚠️ 请访问 " + getDeviceUrl() + " 配置系统参数"));
     }
   }
+  maintainWifiConnection();
   checkConcatTimeout();
   if (Serial.available()) Serial1.write(Serial.read());
   checkSerial1URC();

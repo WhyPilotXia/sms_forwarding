@@ -196,6 +196,7 @@ const char* htmlPage = R"rawliteral(
       <div class="sidebar-section-label">配置</div>
       <a data-panel="overview" class="active"><span class="ico">🏠</span> <span>系统概览</span></a>
       <a data-panel="account"><span class="ico">🔐</span> <span>账号管理</span></a>
+      <a data-panel="wifi"><span class="ico">📡</span> <span>WiFi 设置</span></a>
       <a data-panel="email"><span class="ico">📧</span> <span>邮件通知</span></a>
       <a data-panel="push"><span class="ico">🔗</span> <span>推送通道</span></a>
       <a data-panel="admin"><span class="ico">👤</span> <span>管理员 &amp; 黑名单</span></a>
@@ -268,6 +269,32 @@ const char* htmlPage = R"rawliteral(
       </div>
       <button type="submit" class="btn btn-primary btn-block btn-save">保存配置</button>
       </form>
+    </div>
+
+    <!-- ===== WiFi Settings ===== -->
+    <div class="panel" id="panel-wifi">
+      <h1 class="page-title">WiFi 设置</h1>
+      <p class="page-subtitle">正常联网和配置热点模式下均可切换首选 WiFi</p>
+      <div class="card">
+        <div class="card-header">📡 当前状态</div>
+        <div class="card-body">
+          <table class="info-table">
+            <tr><td>运行模式</td><td>%WIFI_MODE%</td></tr>
+            <tr><td>当前 STA</td><td>%WIFI_SSID%</td></tr>
+            <tr><td>配置热点</td><td>SMS-Forward-Setup / %WIFI_AP_IP%</td></tr>
+          </table>
+          <p class="form-hint">连接配置热点后访问 http://192.168.4.1/，Web 登录账号与主界面相同。</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">🔄 切换网络</div>
+        <div class="card-body">
+          <div class="form-group"><label class="form-label">WiFi SSID</label><input class="form-input" type="text" id="wifiSsid" value="%WIFI_CONFIG_SSID%" maxlength="32" list="wifiList"><datalist id="wifiList"></datalist></div>
+          <div class="form-group"><label class="form-label">WiFi 密码</label><input class="form-input" type="password" id="wifiPassword" placeholder="同一 SSID 留空则保留；新 SSID 留空表示开放网络" maxlength="63"></div>
+          <div class="btn-row"><button class="btn btn-secondary" onclick="scanWifi()">扫描附近 WiFi</button><button class="btn btn-primary" onclick="saveWifi()">保存并切换</button></div>
+          <div class="result-box" id="wifiConfigResult"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ===== Email ===== -->
@@ -558,6 +585,27 @@ const char* htmlPage = R"rawliteral(
         // 重启导致连接中断属正常现象
         scheduleSysReload();
       });
+    }
+
+    // ---- WiFi Settings ----
+    function scanWifi(){
+      var r=document.getElementById('wifiConfigResult'),list=document.getElementById('wifiList');
+      r.className='result-box result-loading';r.textContent='正在扫描附近 WiFi...';
+      fetch('/wifi/scan').then(function(x){return x.json()}).then(function(items){
+        list.innerHTML='';
+        items.forEach(function(item){var o=document.createElement('option');o.value=item.ssid;o.label=item.rssi+' dBm'+(item.open?'（开放）':'');list.appendChild(o);});
+        r.className='result-box result-success';r.textContent='扫描完成，共发现 '+items.length+' 个网络';
+      }).catch(function(e){r.className='result-box result-error';r.textContent='扫描失败: '+e;});
+    }
+    function saveWifi(){
+      var ssid=document.getElementById('wifiSsid').value.trim(),pass=document.getElementById('wifiPassword').value;
+      var r=document.getElementById('wifiConfigResult');
+      if(!ssid){r.className='result-box result-error';r.textContent='请输入 SSID';return;}
+      r.className='result-box result-loading';r.textContent='正在保存并切换...';
+      var body='ssid='+encodeURIComponent(ssid)+'&password='+encodeURIComponent(pass);
+      fetch('/wifi/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(x){return x.json()}).then(function(d){
+        r.className=d.success?'result-box result-success':'result-box result-error';r.textContent=d.message;
+      }).catch(function(){r.className='result-box result-success';r.textContent='设备正在切换网络；请连接配置热点并访问 http://192.168.4.1/';});
     }
 
     // ---- WiFi Control ----

@@ -39,6 +39,8 @@ struct Config {
   String smtpUser;
   String smtpPass;
   String smtpSendTo;
+  String wifiSsid;        // 当前首选 WiFi，保存到 NVS
+  String wifiPass;        // 当前首选 WiFi 密码，保存到 NVS
   String adminPhone;
   PushChannel pushChannels[MAX_PUSH_CHANNELS];  // 多推送通道
   String webUser;      // Web管理账号
