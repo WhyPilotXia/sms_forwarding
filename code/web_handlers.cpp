@@ -5,6 +5,7 @@
 #include "push.h"
 #include "wifi_config.h"
 #include "wifi_manager.h"
+#include "ping_task.h"
 
 // ---- 日志环形缓冲区 ----
 String logBuffer[LOG_BUF_SIZE];
@@ -683,182 +684,20 @@ void handleSendSms() {
   server.send(200, "text/html", html);
 }
 
-// 处理Ping请求
+// 启动非阻塞 Ping 任务；AT 流程由 loop() 中的 updatePingTask() 推进。
 void handlePing() {
   if (!checkAuth()) return;
-  
-  logCaptureLn(String("网页端发起Ping请求"));
-  
-  // 清空串口缓冲区
-  while (Serial1.available()) Serial1.read();
-  
-  // 激活PDP上下文（数据连接）
-  logCaptureLn(String("激活数据连接(CGACT)..."));
-  String activateResp = sendATCommand("AT+CGACT=1,1", 10000);
-  logCaptureLn(String("CGACT响应: " + activateResp));
-  
-  // 检查激活是否成功（OK或已激活的情况）
-  bool networkActivated = (activateResp.indexOf("OK") >= 0);
-  if (!networkActivated) {
-    logCaptureLn(String("数据连接激活失败，尝试继续执行..."));
+  if (!startPingTask()) {
+    server.send(429, "application/json", "{\"success\":false,\"message\":\"Ping 正在执行，请勿重复提交\"}");
+    return;
   }
-  
-  // 清空串口缓冲区
-  while (Serial1.available()) Serial1.read();
-  delay(500);  // 等待网络稳定
-  
-  // 发送MPING命令，ping 8.8.8.8，超时30秒，ping 1次
-  Serial1.println("AT+MPING=\"8.8.8.8\",30,1");
-  
-  // 等待响应
-  unsigned long start = millis();
-  String resp = "";
-  bool gotOK = false;
-  bool gotError = false;
-  bool gotPingResult = false;
-  String pingResultMsg = "";
-  
-  // 等待最多35秒（30秒超时 + 5秒余量）
-  while (millis() - start < 35000) {
-    while (Serial1.available()) {
-      char c = Serial1.read();
-      resp += c;
-      logCapture(String(c));  // 调试输出
-      
-      // 检查是否收到OK
-      if (resp.indexOf("OK") >= 0 && !gotOK) {
-        gotOK = true;
-      }
-      
-      // 检查是否收到ERROR
-      if (resp.indexOf("+CME ERROR") >= 0 || resp.indexOf("ERROR") >= 0) {
-        gotError = true;
-        pingResultMsg = "模组返回错误";
-        break;
-      }
-      
-      // 检查是否收到Ping结果URC
-      // 成功格式: +MPING: 1,8.8.8.8,32,xxx,xxx
-      // 失败格式: +MPING: 2 或其他
-      int mpingIdx = resp.indexOf("+MPING:");
-      if (mpingIdx >= 0) {
-        // 找到换行符确定完整的一行
-        int lineEnd = resp.indexOf('\n', mpingIdx);
-        if (lineEnd >= 0) {
-          String mpingLine = resp.substring(mpingIdx, lineEnd);
-          mpingLine.trim();
-          logCaptureLn(String("收到MPING结果: " + mpingLine));
-          
-          // 解析结果
-          // +MPING: <result>[,<ip>,<packet_len>,<time>,<ttl>]
-          int colonIdx = mpingLine.indexOf(':');
-          if (colonIdx >= 0) {
-            String params = mpingLine.substring(colonIdx + 1);
-            params.trim();
-            
-            // 获取第一个参数（result）
-            int commaIdx = params.indexOf(',');
-            String resultStr;
-            if (commaIdx >= 0) {
-              resultStr = params.substring(0, commaIdx);
-            } else {
-              resultStr = params;
-            }
-            resultStr.trim();
-            int result = resultStr.toInt();
-            
-            gotPingResult = true;
-            
-            // result=0或1都表示成功（不同模组可能返回不同值）
-            // 如果有完整的响应参数（IP、时间等），也视为成功
-            bool pingSuccess = (result == 0 || result == 1) || (params.indexOf(',') >= 0 && params.length() > 5);
-            
-            if (pingSuccess) {
-              // 成功，解析详细信息
-              // 格式: 0/1,"8.8.8.8",16,时间,TTL
-              int idx1 = params.indexOf(',');
-              if (idx1 >= 0) {
-                String rest = params.substring(idx1 + 1);
-                // 处理IP地址（可能带引号）
-                String ip;
-                int idx2;
-                if (rest.startsWith("\"")) {
-                  // 带引号的IP
-                  int quoteEnd = rest.indexOf('\"', 1);
-                  if (quoteEnd >= 0) {
-                    ip = rest.substring(1, quoteEnd);
-                    idx2 = rest.indexOf(',', quoteEnd);
-                  } else {
-                    idx2 = rest.indexOf(',');
-                    ip = rest.substring(0, idx2);
-                  }
-                } else {
-                  idx2 = rest.indexOf(',');
-                  ip = rest.substring(0, idx2);
-                }
-                
-                if (idx2 >= 0) {
-                  rest = rest.substring(idx2 + 1);
-                  int idx3 = rest.indexOf(',');  // packet_len后
-                  if (idx3 >= 0) {
-                    rest = rest.substring(idx3 + 1);
-                    int idx4 = rest.indexOf(',');  // time后
-                    String timeStr, ttlStr;
-                    if (idx4 >= 0) {
-                      timeStr = rest.substring(0, idx4);
-                      ttlStr = rest.substring(idx4 + 1);
-                    } else {
-                      timeStr = rest;
-                      ttlStr = "N/A";
-                    }
-                    timeStr.trim();
-                    ttlStr.trim();
-                    pingResultMsg = "目标: " + ip + ", 延迟: " + timeStr + "ms, TTL: " + ttlStr;
-                  }
-                }
-              }
-              if (pingResultMsg.length() == 0) {
-                pingResultMsg = "Ping成功";
-              }
-            } else {
-              // 失败
-              pingResultMsg = "Ping超时或目标不可达 (错误码: " + String(result) + ")";
-            }
-            break;
-          }
-        }
-      }
-    }
-    
-    if (gotError || gotPingResult) break;
-    server.handleClient();
-  }
-  
-  logCaptureLn(String("\nPing操作完成"));
-  
-  // 关闭数据连接以节省流量
-  logCaptureLn(String("关闭PDP上下文(CGACT=0)..."));
-  String deactivateResp = sendATCommand("AT+CGACT=0,1", 5000);
-  logCaptureLn(String("CGACT关闭响应: " + deactivateResp));
-  
-  // 构建JSON响应
-  String json = "{";
-  if (gotPingResult && pingResultMsg.indexOf("延迟") >= 0) {
-    json += "\"success\":true,";
-    json += "\"message\":\"" + pingResultMsg + "\"";
-  } else if (gotError) {
-    json += "\"success\":false,";
-    json += "\"message\":\"" + pingResultMsg + "\"";
-  } else if (gotPingResult) {
-    json += "\"success\":false,";
-    json += "\"message\":\"" + pingResultMsg + "\"";
-  } else {
-    json += "\"success\":false,";
-    json += "\"message\":\"操作超时，未收到Ping结果\"";
-  }
-  json += "}";
-  
-  server.send(200, "application/json", json);
+  server.send(202, "application/json", "{\"success\":true,\"running\":true,\"message\":\"Ping 已启动\"}");
+}
+
+void handlePingStatus() {
+  if (!checkAuth()) return;
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", getPingTaskJson());
 }
 
 // 处理保存配置请求
@@ -986,8 +825,7 @@ void handleLog() {
 void handleModem() {
   if (!checkAuth()) return;
 
-  // 防止重入：modemInit() 内部会调 server.handleClient()，
-  // 若浏览器超时重试会导致嵌套调用，最终拖垮 WiFi
+  // 防止同一模组控制请求重复提交。
   static bool busy = false;
   if (busy) {
     server.send(429, "application/json", "{\"success\":false,\"message\":\"模组正忙，请稍后重试\"}");

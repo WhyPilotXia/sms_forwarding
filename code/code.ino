@@ -10,6 +10,8 @@
 #include "sms_process.h"
 #include "web_handlers.h"
 #include "wifi_manager.h"
+#include "ping_task.h"
+#include "notify_queue.h"
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -41,6 +43,7 @@ void setup() {
   server.on("/sms", handleRoot);
   server.on("/sendsms", HTTP_POST, handleSendSms);
   server.on("/ping", HTTP_POST, handlePing);
+  server.on("/ping/status", handlePingStatus);
   server.on("/query", handleQuery);
   server.on("/flight", handleFlightMode);
   server.on("/at", handleATCommand);
@@ -99,6 +102,8 @@ void loop() {
     }
   }
   maintainWifiConnection();
+  updatePingTask();
+  processNotifyQueue();
   checkConcatTimeout();
   if (Serial.available()) Serial1.write(Serial.read());
   checkSerial1URC();

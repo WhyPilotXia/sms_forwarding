@@ -560,12 +560,17 @@ const char* htmlPage = R"rawliteral(
     function doPing(){
       var b=document.getElementById('pingBtn'),r=document.getElementById('pingResult');
       b.disabled=true;b.textContent='Pinging...';
-      r.className='result-box result-loading';r.textContent='正在 Ping 8.8.8.8（最长 30 秒）...';
+      r.className='result-box result-loading';r.textContent='正在后台 Ping 8.8.8.8...';
       fetch('/ping',{method:'POST'}).then(function(rr){return rr.json()}).then(function(d){
+        if(!d.success){throw new Error(d.message);} pollPingStatus(b,r);
+      }).catch(function(e){b.disabled=false;b.textContent='Ping 8.8.8.8';r.className='result-box result-error';r.textContent='启动失败: '+e;});
+    }
+    function pollPingStatus(b,r){
+      fetch('/ping/status').then(function(x){return x.json()}).then(function(d){
+        if(d.running){r.textContent=d.message;setTimeout(function(){pollPingStatus(b,r)},700);return;}
         b.disabled=false;b.textContent='Ping 8.8.8.8';
-        if(d.success){r.className='result-box result-success';r.innerHTML='Ping 成功 — '+d.message;}
-        else{r.className='result-box result-error';r.innerHTML='Ping 失败 — '+d.message;}
-      }).catch(function(e){b.disabled=false;b.textContent='Ping 8.8.8.8';r.className='result-box result-error';r.textContent='请求失败: '+e;});
+        r.className=d.success?'result-box result-success':'result-box result-error';r.textContent=d.message;
+      }).catch(function(e){b.disabled=false;b.textContent='Ping 8.8.8.8';r.className='result-box result-error';r.textContent='状态查询失败: '+e;});
     }
 
     // ---- System Control ----

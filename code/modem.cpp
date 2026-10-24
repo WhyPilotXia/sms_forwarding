@@ -17,12 +17,12 @@ String sendATCommand(const char* cmd, unsigned long timeout) {
         unsigned long t = millis();
         while (millis() - t < 50) {
           if (Serial1.available()) resp += (char)Serial1.read();
-          server.handleClient();
+          delay(1);
         }
         return resp;
       }
     }
-    server.handleClient();
+    delay(1);
   }
   return resp;
 }
@@ -141,7 +141,7 @@ bool sendATandWaitOK(const char* cmd, unsigned long timeout) {
       if (resp.indexOf("OK") >= 0) return true;
       if (resp.indexOf("ERROR") >= 0) return false;
     }
-    server.handleClient();
+    delay(1);
   }
   return false;
 }
@@ -162,7 +162,7 @@ bool waitCEREG() {
             resp.indexOf(",3") >= 0 || resp.indexOf(",4") >= 0) return false;
       }
     }
-    server.handleClient();
+    delay(1);
   }
   return false;
 }
@@ -205,7 +205,7 @@ bool sendSMS(const char* phoneNumber, const char* message) {
         break;
       }
     }
-    server.handleClient();
+    delay(1);
   }
   
   if (!gotPrompt) {
@@ -234,7 +234,7 @@ bool sendSMS(const char* phoneNumber, const char* message) {
         return false;
       }
     }
-    server.handleClient();
+    delay(1);
   }
   logCaptureLn(String("短信发送超时"));
   return false;
