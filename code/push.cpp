@@ -2,6 +2,7 @@
 #include "web_handlers.h"
 #include "config.h"
 #include "web_handlers.h"
+#include "wifi_manager.h"
 #include <HTTPClient.h>
 #include <mbedtls/md.h>
 #include <base64.h>
@@ -210,9 +211,11 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
   String channelName = channel.name.length() > 0 ? channel.name : ("通道" + String(channel.type));
   logCaptureLn(String("发送到推送通道: " + channelName));
 
+  String deviceUrl = "http://" + getActiveWifiAddress() + "/";
   String senderEscaped = jsonEscape(String(sender));
   String messageEscaped = jsonEscape(String(message));
   String timestampEscaped = jsonEscape(String(timestamp));
+  String deviceUrlEscaped = jsonEscape(deviceUrl);
 
   String reqUrl = "";
   String reqBody = "";
@@ -226,7 +229,8 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqBody = "{";
       reqBody += "\"sender\":\"" + senderEscaped + "\",";
       reqBody += "\"message\":\"" + messageEscaped + "\",";
-      reqBody += "\"timestamp\":\"" + timestampEscaped + "\"";
+      reqBody += "\"timestamp\":\"" + timestampEscaped + "\",";
+      reqBody += "\"device_url\":\"" + deviceUrlEscaped + "\"";
       reqBody += "}";
       logCaptureLn(String("POST JSON: " + reqBody));
       break;
@@ -237,7 +241,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqUrl = channel.url;
       reqBody = "{";
       reqBody += "\"title\":\"" + senderEscaped + "\",";
-      reqBody += "\"body\":\"" + messageEscaped + "\"";
+      reqBody += "\"body\":\"" + messageEscaped + "\\n\\n设备地址: " + deviceUrlEscaped + "\"";
       reqBody += "}";
       logCaptureLn(String("BARK JSON: " + reqBody));
       break;
@@ -254,6 +258,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       getUrl += "sender=" + urlEncode(String(sender));
       getUrl += "&message=" + urlEncode(String(message));
       getUrl += "&timestamp=" + urlEncode(String(timestamp));
+      getUrl += "&device_url=" + urlEncode(deviceUrl);
       logCaptureLn(String("GET URL: " + getUrl));
       reqUrl = getUrl;
       useGet = true;
@@ -279,7 +284,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       }
       reqUrl = webhookUrl;
       reqBody = "{\"msgtype\":\"text\",\"text\":{\"content\":\"";
-      reqBody += "📱短信通知\\n发送者: " + senderEscaped + "\\n内容: " + messageEscaped + "\\n时间: " + timestampEscaped;
+      reqBody += "📱短信通知\\n发送者: " + senderEscaped + "\\n内容: " + messageEscaped + "\\n时间: " + timestampEscaped + "\\n局域网设备地址: " + deviceUrlEscaped;
       reqBody += "\"}}";
       logCaptureLn(String("钉钉: " + reqBody));
       break;
@@ -301,7 +306,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqBody = "{";
       reqBody += "\"token\":\"" + channel.key1 + "\",";
       reqBody += "\"title\":\"短信来自: " + senderEscaped + "\",";
-      reqBody += "\"content\":\"<b>发送者:</b> " + senderEscaped + "<br><b>时间:</b> " + timestampEscaped + "<br><b>内容:</b><br>" + messageEscaped + "\",";
+      reqBody += "\"content\":\"<b>发送者:</b> " + senderEscaped + "<br><b>时间:</b> " + timestampEscaped + "<br><b>内容:</b><br>" + messageEscaped + "<br><b>局域网设备地址:</b> " + deviceUrlEscaped + "\",";
       reqBody += "\"channel\":\"" + channelValue + "\"";
       reqBody += "}";
       logCaptureLn(String("PushPlus: " + reqBody));
@@ -313,7 +318,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqUrl = channel.url.length() > 0 ? channel.url : ("https://sctapi.ftqq.com/" + channel.key1 + ".send");
       reqContentType = "application/x-www-form-urlencoded";
       reqBody = "title=" + urlEncode("短信来自: " + String(sender));
-      reqBody += "&desp=" + urlEncode("**发送者:** " + String(sender) + "\n\n**时间:** " + String(timestamp) + "\n\n**内容:**\n\n" + String(message));
+      reqBody += "&desp=" + urlEncode("**发送者:** " + String(sender) + "\n\n**时间:** " + String(timestamp) + "\n\n**内容:**\n\n" + String(message) + "\n\n**局域网设备地址:** " + deviceUrl);
       logCaptureLn(String("Server酱: " + reqBody));
       break;
     }
@@ -329,6 +334,8 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqBody.replace("{sender}", senderEscaped);
       reqBody.replace("{message}", messageEscaped);
       reqBody.replace("{timestamp}", timestampEscaped);
+      reqBody.replace("{device_url}", deviceUrlEscaped);
+      reqBody.replace("{deviceUrl}", deviceUrlEscaped);
       logCaptureLn(String("自定义: " + reqBody));
       break;
     }
@@ -358,7 +365,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       // 飞书消息体
       jsonData += "\"msg_type\":\"text\",";
       jsonData += "\"content\":{\"text\":\"";
-      jsonData += "📱短信通知\\n发送者: " + senderEscaped + "\\n内容: " + messageEscaped + "\\n时间: " + timestampEscaped;
+      jsonData += "📱短信通知\\n发送者: " + senderEscaped + "\\n内容: " + messageEscaped + "\\n时间: " + timestampEscaped + "\\n局域网设备地址: " + deviceUrlEscaped;
       jsonData += "\"}}";
 
       reqUrl = channel.url;
@@ -377,7 +384,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
       reqUrl = gotifyUrl;
       reqBody = "{";
       reqBody += "\"title\":\"短信来自: " + senderEscaped + "\",";
-      reqBody += "\"message\":\"" + messageEscaped + "\\n\\n时间: " + timestampEscaped + "\",";
+      reqBody += "\"message\":\"" + messageEscaped + "\\n\\n时间: " + timestampEscaped + "\\n局域网设备地址: " + deviceUrlEscaped + "\",";
       reqBody += "\"priority\":5";
       reqBody += "}";
       logCaptureLn(String("Gotify: " + reqBody));
@@ -391,7 +398,7 @@ void sendToChannel(const PushChannel& channel, const char* sender, const char* m
 
       reqUrl = tgBaseUrl + "/bot" + channel.key2 + "/sendMessage";
 
-      String text = "📱短信通知\n发送者: " + senderEscaped + "\n内容: " + messageEscaped + "\n时间: " + timestampEscaped;
+      String text = "📱短信通知\\n发送者: " + senderEscaped + "\\n内容: " + messageEscaped + "\\n时间: " + timestampEscaped + "\\n局域网设备地址: " + deviceUrlEscaped;
       reqBody = "{";
       reqBody += "\"chat_id\":\"" + channel.key1 + "\",";
       reqBody += "\"text\":\"" + text + "\"";

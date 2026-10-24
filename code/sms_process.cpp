@@ -4,6 +4,7 @@
 #include "web_handlers.h"
 #include "push.h"
 #include "web_handlers.h"
+#include "wifi_manager.h"
 
 // 初始化长短信缓存
 void initConcatBuffer() {
@@ -408,6 +409,7 @@ void processSmsContent(const char* sender, const char* text, const char* timesta
   // 发送通知邮件
   String subject = ""; subject+="短信";subject+=sender;subject+=",";subject+=text;
   String body = ""; body+="来自：";body+=sender;body+="，时间：";body+=timestamp;body+="，内容：";body+=text;
+  body += "\n局域网设备地址：http://" + getActiveWifiAddress() + "/";
   sendEmailNotification(subject.c_str(), body.c_str());
 }
 

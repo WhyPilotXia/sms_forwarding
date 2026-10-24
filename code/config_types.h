@@ -29,7 +29,7 @@ struct PushChannel {
   String url;             // 推送URL（webhook地址）
   String key1;            // 额外参数1（如：钉钉secret、pushplus token等）
   String key2;            // 额外参数2（备用）
-  String customBody;      // 自定义请求体模板（使用 {sender} {message} {timestamp} 占位符）
+  String customBody;      // 自定义请求体模板（支持 {sender} {message} {timestamp} {device_url}）
 };
 
 // 配置参数结构体
