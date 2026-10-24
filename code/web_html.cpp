@@ -540,13 +540,19 @@ const char* htmlPage = R"rawliteral(
     function updateCount(el) { document.getElementById('charCount').textContent = el.value.length; }
 
     // ---- Query ----
+    var queryBusy = false;
     function queryInfo(type) {
-      var r = document.getElementById('queryResult');
-      r.className = 'result-box result-loading'; r.textContent = '查询中...';
-      fetch('/query?type=' + type).then(function(rr){return rr.json()}).then(function(d){
+      if(queryBusy)return;
+      queryBusy=true;
+      var r=document.getElementById('queryResult'),buttons=document.querySelectorAll('#panel-diagnose button');
+      buttons.forEach(function(b){b.disabled=true;});
+      r.className='result-box result-loading';r.textContent='查询中...';
+      fetch('/query?type='+type).then(function(rr){return rr.json()}).then(function(d){
         if(d.success){r.className='result-box result-info';r.innerHTML=d.message;}
         else{r.className='result-box result-error';r.innerHTML='查询失败: '+d.message;}
-      }).catch(function(e){r.className='result-box result-error';r.textContent='请求失败: '+e;});
+      }).catch(function(e){r.className='result-box result-error';r.textContent='请求失败: '+e;}).finally(function(){
+        queryBusy=false;buttons.forEach(function(b){b.disabled=false;});
+      });
     }
 
     // ---- Ping ----

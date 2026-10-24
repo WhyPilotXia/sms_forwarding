@@ -330,6 +330,14 @@ void handleATCommand() {
 // 处理模组信息查询请求
 void handleQuery() {
   if (!checkAuth()) return;
+
+  // sendATCommand() 等待期间会继续处理 HTTP；防止重复点击造成查询处理器嵌套重入。
+  static bool busy = false;
+  if (busy) {
+    server.send(429, "application/json", "{\"success\":false,\"message\":\"模组查询正忙，请稍后再试\"}");
+    return;
+  }
+  busy = true;
   
   String type = server.arg("type");
   String json = "{";
@@ -437,12 +445,12 @@ void handleQuery() {
     }
   }
   else if (type == "siminfo") {
-    // SIM卡信息查询
+    // SIM 卡信息由 3 条独立 AT 指令组成；每条使用较短超时，避免某个不支持项拖慢整个页面。
     success = true;
     message = "<table class='info-table'>";
     
     // 查询IMSI
-    String resp = sendATCommand("AT+CIMI", 2000);
+    String resp = sendATCommand("AT+CIMI", 1000);
     String imsi = "未知";
     if (resp.indexOf("OK") >= 0) {
       int start = resp.indexOf('\n');
@@ -459,7 +467,7 @@ void handleQuery() {
     message += "<tr><td>IMSI</td><td>" + imsi + "</td></tr>";
     
     // 查询ICCID
-    resp = sendATCommand("AT+ICCID", 2000);
+    resp = sendATCommand("AT+ICCID", 1000);
     String iccid = "未知";
     if (resp.indexOf("+ICCID:") >= 0) {
       int idx = resp.indexOf("+ICCID:");
@@ -472,7 +480,7 @@ void handleQuery() {
     message += "<tr><td>ICCID</td><td>" + iccid + "</td></tr>";
     
     // 查询本机号码 (如果SIM卡支持)
-    resp = sendATCommand("AT+CNUM", 2000);
+    resp = sendATCommand("AT+CNUM", 500);
     String phoneNum = "未存储或不支持";
     if (resp.indexOf("+CNUM:") >= 0) {
       int idx = resp.indexOf(",\"");
@@ -493,7 +501,7 @@ void handleQuery() {
     message = "<table class='info-table'>";
     
     // 查询网络注册状态
-    String resp = sendATCommand("AT+CEREG?", 2000);
+    String resp = sendATCommand("AT+CEREG?", 1000);
     String regStatus = "未知";
     if (resp.indexOf("+CEREG:") >= 0) {
       int idx = resp.indexOf("+CEREG:");
@@ -516,7 +524,7 @@ void handleQuery() {
     message += "<tr><td>网络注册</td><td>" + regStatus + "</td></tr>";
     
     // 查询运营商
-    resp = sendATCommand("AT+COPS?", 2000);
+    resp = sendATCommand("AT+COPS?", 1200);
     String oper = "未知";
     if (resp.indexOf("+COPS:") >= 0) {
       int idx = resp.indexOf(",\"");
@@ -530,7 +538,7 @@ void handleQuery() {
     message += "<tr><td>运营商</td><td>" + oper + "</td></tr>";
     
     // 查询PDP上下文激活状态
-    resp = sendATCommand("AT+CGACT?", 2000);
+    resp = sendATCommand("AT+CGACT?", 800);
     String pdpStatus = "未激活";
     if (resp.indexOf("+CGACT: 1,1") >= 0) {
       pdpStatus = "已激活";
@@ -540,7 +548,7 @@ void handleQuery() {
     message += "<tr><td>数据连接</td><td>" + pdpStatus + "</td></tr>";
     
     // 查询APN
-    resp = sendATCommand("AT+CGDCONT?", 2000);
+    resp = sendATCommand("AT+CGDCONT?", 800);
     String apn = "未知";
     if (resp.indexOf("+CGDCONT:") >= 0) {
       int idx = resp.indexOf(",\"");
@@ -615,6 +623,7 @@ void handleQuery() {
   json += "\"message\":\"" + message + "\"";
   json += "}";
   
+  busy = false;
   server.send(200, "application/json", json);
 }
 

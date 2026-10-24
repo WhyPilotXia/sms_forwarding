@@ -90,9 +90,12 @@ void setup() {
 void loop() {
   server.handleClient();
   if (!configValid) {
-    if (millis() - lastPrintTime >= 1000) {
+    // configValid 仅表示“至少配置了邮件或一个推送通道”，与 SIM/WiFi 是否正常无关。
+    // 降低提示频率，避免淹没短信和模组诊断日志。
+    if (lastPrintTime == 0 || millis() - lastPrintTime >= 30000UL) {
       lastPrintTime = millis();
-      logCaptureLn(String("⚠️ 请访问 " + getDeviceUrl() + " 配置系统参数"));
+      logCaptureLn(String("⚠️ 尚未配置通知通道：请访问 " + getDeviceUrl() +
+                          "，在“邮件通知”或“推送通道”中至少配置一项；否则短信只接收、不转发"));
     }
   }
   maintainWifiConnection();
